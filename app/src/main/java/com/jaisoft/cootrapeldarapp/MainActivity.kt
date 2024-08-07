@@ -1,17 +1,26 @@
 package com.jaisoft.cootrapeldarapp
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.DownloadListener
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.jaisoft.cootrapeldarapp.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
@@ -26,6 +35,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        checkPermissions() // Verificar permisos
 
         email = intent.getStringExtra("email")
         password = intent.getStringExtra("password")
@@ -40,6 +50,23 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         attemptLogin()
+    }
+
+    private fun checkPermissions() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 1)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1) {
+            if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
+                // Permiso concedido, puedes proceder con la descarga
+            } else {
+                Toast.makeText(this, "Permiso de escritura denegado", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun redirectToLogin() {
@@ -59,6 +86,24 @@ class MainActivity : AppCompatActivity() {
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
         cookieManager.setAcceptThirdPartyCookies(binding.visor, true)
+
+        // Configurar el DownloadListener
+        binding.visor.setDownloadListener(object : DownloadListener {
+            override fun onDownloadStart(url: String?, userAgent: String?, contentDisposition: String?, mimeType: String?, contentLength: Long) {
+                if (url != null) {
+                    val request = DownloadManager.Request(Uri.parse(url))
+                    request.setTitle("Descargando archivo")
+                    request.setDescription("Descargando desde la aplicación")
+                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "downloaded_file") // Cambia el nombre según sea necesario
+
+                    val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    downloadManager.enqueue(request)
+                } else {
+                    Toast.makeText(this@MainActivity, "URL de descarga no válida", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
     }
 
     private fun attemptLogin() {
@@ -75,7 +120,7 @@ class MainActivity : AppCompatActivity() {
                     binding.visor.evaluateJavascript(jsCode, null)
                     loginAttempted = true
 
-                    // Set a timeout for redirection
+                    // Establecer un tiempo de espera para la redirección
                     handler.postDelayed({
                         if (!loginSuccessful) {
                             notifyLoginFailure("Credenciales incorrectas.")
@@ -85,10 +130,6 @@ class MainActivity : AppCompatActivity() {
                     loginSuccessful = true
                     notifyLoginSuccess()
                 }
-            }
-
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                notifyLoginFailure("No tiene internet.")
             }
         }
 
