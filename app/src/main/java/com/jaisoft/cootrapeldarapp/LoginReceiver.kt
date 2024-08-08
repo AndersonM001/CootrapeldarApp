@@ -9,12 +9,13 @@ class LoginReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         when (intent?.action) {
             "com.jaisoft.cootrapeldarapp.LOGIN_SUCCESS" -> {
-                // Login successful, finish LoginActivity
-                Toast.makeText(context, "Inicio de sesión exitoso", Toast.LENGTH_SHORT).show()
-                (context as? LoginActivity)?.finish()
+                if (context is LoginActivity) {
+                    val email = intent.getStringExtra("email") ?: ""
+                    val password = intent.getStringExtra("password") ?: ""
+                    context.handleLoginSuccess(email, password)
+                }
             }
             "com.jaisoft.cootrapeldarapp.LOGIN_FAILED" -> {
-                // Login failed, show a toast message
                 Toast.makeText(context, "Inicio de sesión fallido. Por favor, inténtelo de nuevo.", Toast.LENGTH_SHORT).show()
             }
         }

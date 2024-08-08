@@ -2,18 +2,25 @@ package com.jaisoft.cootrapeldarapp
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Dialog
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
+import android.view.View
+import android.view.Window
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
-import android.webkit.WebResourceError
+import android.webkit.URLUtil
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,15 +29,29 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.jaisoft.cootrapeldarapp.databinding.ActivityMainBinding
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.widget.Button
+import androidx.appcompat.app.AlertDialog
+import androidx.transition.Visibility
+
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private var loginAttempted = false
     private var loginSuccessful = false
     private val handler = Handler(Looper.getMainLooper())
+    private var isDialogVisible = false
+    private lateinit var dialog: Dialog
+    private lateinit var cookieHandler: CookieHandler
 
     private var email: String? = null
     private var password: String? = null
+    private var biometrica: String? = null
+
+    companion object {
+        private const val REQUEST_WRITE_STORAGE = 112
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,16 +74,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissions() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 1)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE), REQUEST_WRITE_STORAGE)
+            }
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1) {
+        if (requestCode == REQUEST_WRITE_STORAGE) {
             if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
                 // Permiso concedido, puedes proceder con la descarga
+                Toast.makeText(this, "Permiso de escritura concedido", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Permiso de escritura denegado", Toast.LENGTH_SHORT).show()
             }
@@ -82,6 +107,8 @@ class MainActivity : AppCompatActivity() {
         webSettings.domStorageEnabled = true
         webSettings.loadWithOverviewMode = true
         webSettings.useWideViewPort = true
+        binding.visor.webViewClient = WebViewClient()
+        binding.visor.webChromeClient = WebChromeClient()
 
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
@@ -92,15 +119,16 @@ class MainActivity : AppCompatActivity() {
             override fun onDownloadStart(url: String?, userAgent: String?, contentDisposition: String?, mimeType: String?, contentLength: Long) {
                 if (url != null) {
                     val request = DownloadManager.Request(Uri.parse(url))
-                    request.setTitle("Descargando archivo")
-                    request.setDescription("Descargando desde la aplicación")
+                    val cookies = CookieManager.getInstance().getCookie(url)
+                    request.addRequestHeader("cookie", cookies)
+                    request.addRequestHeader("User-Agent", userAgent)
+                    request.setDescription("Descargando archivo...")
+                    request.setTitle(URLUtil.guessFileName(url, contentDisposition, mimeType))
+                    request.allowScanningByMediaScanner()
                     request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "downloaded_file") // Cambia el nombre según sea necesario
-
-                    val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                    downloadManager.enqueue(request)
-                } else {
-                    Toast.makeText(this@MainActivity, "URL de descarga no válida", Toast.LENGTH_SHORT).show()
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, URLUtil.guessFileName(url, contentDisposition, mimeType))
+                    val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    dm.enqueue(request)
                 }
             }
         })
@@ -138,9 +166,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun notifyLoginSuccess() {
         val loginIntent = Intent("com.jaisoft.cootrapeldarapp.LOGIN_SUCCESS")
+        loginIntent.putExtra("email", email)
+        loginIntent.putExtra("password", password)
+        biometrica = intent.getStringExtra("biometrica")
         sendBroadcast(loginIntent)
+        Toast.makeText(this, biometrica.toString(), Toast.LENGTH_SHORT).show()
         Toast.makeText(this, "Inicio de sesión exitoso", Toast.LENGTH_SHORT).show()
-        setContentView(binding.root)
+        if (biometrica == "true") {
+            Toast.makeText(this, "Credenciales guardadas", Toast.LENGTH_SHORT).show()
+            showSaveCredentialsDialog(email!!, password!!)
+        }
+        Visibility()
     }
 
     private fun notifyLoginFailure(message: String) {
@@ -148,5 +184,96 @@ class MainActivity : AppCompatActivity() {
         sendBroadcast(loginIntent)
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         finish()
+    }
+    private fun configureBackNavigation() {
+        binding.visor.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                if (binding.visor.url.equals("https://app.cootrapeldar.coop/") || binding.visor.url.equals("https://app.cootrapeldar.coop/web/login")) {
+                    showDialog()
+                } else if (binding.visor.canGoBack()) {
+                    binding.visor.goBack()
+                } else {
+                    if (isDialogVisible) {
+                        hideDialog()
+                    } else {
+                        showDialog()
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    override fun onBackPressed() {
+        handleBackPress()
+    }
+
+    private fun handleBackPress() {
+        if (isDialogVisible) {
+            hideDialog()
+        } else if (binding.visor.canGoBack()) {
+            binding.visor.goBack()
+        } else {
+            showDialog()
+        }
+    }
+
+    private fun showDialog() {
+        dialog = Dialog(this).apply {
+            requestWindowFeature(Window.FEATURE_NO_TITLE)
+            setCancelable(false)
+            setContentView(R.layout.custom_dialog_box)
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+            findViewById<Button>(R.id.btnDialogAcept).setOnClickListener { finishAffinity() }
+            findViewById<Button>(R.id.btnDialogCancel).setOnClickListener {
+                dismiss()
+                isDialogVisible = false
+            }
+
+            setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    hideDialog()
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+        isDialogVisible = true
+        dialog.show()
+    }
+
+    private fun hideDialog() {
+        dialog.dismiss()
+        isDialogVisible = false
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+    }
+
+    fun Visibility(){
+        binding.visor.visibility = View.VISIBLE
+    }
+
+    fun showSaveCredentialsDialog(email: String, password: String) {
+        val builder = AlertDialog.Builder(this)
+        builder.setTitle("Guardar credenciales")
+        builder.setMessage("¿Desea guardar sus credenciales para usar la autenticación biométrica?")
+        builder.setPositiveButton("Sí") { dialog, which ->
+            val sharedPreferences = getSharedPreferences("LoginPrefs", Context.MODE_PRIVATE)
+            val editor = sharedPreferences.edit()
+            editor.putString("email", email)
+            editor.putString("password", password)
+            editor.apply()
+        }
+        builder.setNegativeButton("No") { dialog, which ->
+            // No hacer nada
+        }
+        builder.show()
     }
 }
